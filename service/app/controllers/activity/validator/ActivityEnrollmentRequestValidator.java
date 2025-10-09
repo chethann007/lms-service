@@ -130,5 +130,26 @@ public class ActivityEnrollmentRequestValidator extends BaseRequestValidator {
         }
     }
 
+    /**
+     * Validates the request for listing users enrolled in an activity.
+     * Validates activity ID, activity type, and batch ID are present.
+     *
+     * @param request the request object containing activity details
+     * @throws ProjectCommonException if any validation fails
+     */
+    public void validateListActivityEnrollments(Request request) {
+        validateParam(
+                (String) request.getRequest().get(JsonKey.ACTIVITYID),
+                ResponseCode.mandatoryParamsMissing,
+                JsonKey.ACTIVITYID);
+        validateParam(
+                (String) request.getRequest().get(JsonKey.ACTIVITYTYPE),
+                ResponseCode.mandatoryParamsMissing,
+                JsonKey.ACTIVITYTYPE);
+        validateParam(
+                (String) request.getRequest().get(JsonKey.BATCH_ID),
+                ResponseCode.mandatoryParamsMissing,
+                JsonKey.BATCH_ID);
+    }
 
 }
