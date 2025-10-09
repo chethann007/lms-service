@@ -1,6 +1,5 @@
 package org.sunbird.learner.actors.activity;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.sunbird.learner.actors.coursebatch.BaseBatchMgmtActor;
@@ -18,6 +17,7 @@ import org.sunbird.userorg.UserOrgServiceImpl;
 import org.sunbird.kafka.client.InstructionEventGenerator;
 import org.sunbird.learner.actors.activity.dao.ActivityBatchDao;
 import org.sunbird.learner.actors.activity.impl.ActivityBatchDaoImpl;
+import org.sunbird.learner.util.ActivityBatchUtil;
 import org.sunbird.learner.util.Util;
 import org.sunbird.models.activity.ActivityBatch;
 import java.text.ParseException;
@@ -32,7 +32,6 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
 
     private ActivityBatchDao activityBatchDao = new ActivityBatchDaoImpl();
     private UserOrgService userOrgService = UserOrgServiceImpl.getInstance();
-    private ObjectMapper mapper = new ObjectMapper();
     private String dateFormat = "yyyy-MM-dd";
     private String timeZone = ProjectUtil.getConfigValue(JsonKey.SUNBIRD_TIMEZONE);
 
@@ -93,7 +92,7 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
         String activityId = (String) actorMessage.getContext().get(JsonKey.ACTIVITYID);
         RequestContext requestContext = actorMessage.getRequestContext();
         logger.info(requestContext, "ActivityBatchManagementActor:listActivityBatches: activityId=" + activityId);
-        getCollectionDetails(requestContext, activityId);
+        //getCollectionDetails(requestContext, activityId);
         java.util.List<java.util.Map<String, Object>> result = activityBatchDao.listByActivityId(requestContext, activityId);
         logger.info(requestContext, "ActivityBatchManagementActor:listActivityBatches: Found " + (result != null ? result.size() : 0) + " batches for activityId=" + activityId);
         Response response = new Response();
@@ -116,6 +115,7 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
         String batchId = composeBatchId(actorMessage, idFromRequest);
         String activityId = (String) request.get(JsonKey.ACTIVITYID);
         String activityType = (String) request.get(JsonKey.ACTIVITYTYPE);
+        @SuppressWarnings({"unchecked", "unused"})
         Map<String, String> headers = (Map<String, String>) actorMessage.getContext().get(JsonKey.HEADER);
 
         logger.info(requestContext, "ActivityBatchManagementActor:createActivityBatch - Incoming request: activityId=" + activityId + ", activityType=" + activityType + ", requestedBy=" + requestedBy + ", batchId=" + batchId);
@@ -134,6 +134,15 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
         logger.info(requestContext, "ActivityBatchManagementActor:createActivityBatch - Validating createdFor organizations: " + activityBatch.getCreatedFor());
         validateContentOrg(requestContext, activityBatch.getCreatedFor());
         Response result = activityBatchDao.create(requestContext, activityBatch);
+
+        // Sync to Elasticsearch
+        try {
+            Map<String, Object> esActivityBatchMap = ActivityBatchUtil.esActivityBatchMapping(activityBatch, dateFormat);
+            ActivityBatchUtil.syncActivityBatchForeground(requestContext, batchId, esActivityBatchMap);
+            logger.info(requestContext, "ActivityBatchManagementActor:createActivityBatch - Successfully synced to Elasticsearch for batchId=" + batchId);
+        } catch (Exception e) {
+            logger.error(requestContext, "ActivityBatchManagementActor:createActivityBatch - Failed to sync to Elasticsearch for batchId=" + batchId + ", error=" + e.getMessage(), e);
+        }
 
         Map<String, Object> esActivityBatchMap = createActivityBatchMapping(activityBatch, dateFormat);
 
@@ -183,6 +192,7 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
         String batchId = (String) request.get(JsonKey.BATCH_ID);
         String activityId = (String) request.get(JsonKey.ACTIVITYID);
         String activityType = (String) request.get("activityType");
+        @SuppressWarnings({"unchecked", "unused"})
         Map<String, String> headers = (Map<String, String>) actorMessage.getContext().get(JsonKey.HEADER);
 
         logger.info(requestContext, "ActivityBatchManagementActor:updateActivityBatch - Incoming request: activityId=" + activityId + ", activityType=" + activityType + ", requestedBy=" + requestedBy + ", batchId=" + batchId);
@@ -201,13 +211,23 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
         logger.info(requestContext, "ActivityBatchManagementActor:updateActivityBatch - Validating createdFor organizations: " + activityBatch.getCreatedFor());
         validateContentOrg(requestContext, activityBatch.getCreatedFor());
         activityBatch.setUpdatedDate(ProjectUtil.getTimeStamp());
-        Map<String, Object> updateData = new HashMap<>();
-        updateData.putAll(request);
+        
+        // Use proper ActivityBatch object mapping like create operation
+        Map<String, Object> updateData = ActivityBatchUtil.cassandraActivityBatchMapping(activityBatch, dateFormat);
         updateData.remove(JsonKey.BATCH_ID);
         updateData.remove(JsonKey.ACTIVITYID);
-        updateData.put("updatedDate", ProjectUtil.getTimeStamp());
 
         Response result = activityBatchDao.update(requestContext, activityId, batchId, updateData);
+
+        // Sync to Elasticsearch
+        try {
+            ActivityBatch updatedBatch = activityBatchDao.readById(activityId, batchId, requestContext);
+            Map<String, Object> esActivityBatchMap = ActivityBatchUtil.esActivityBatchMapping(updatedBatch, dateFormat);
+            ActivityBatchUtil.syncActivityBatchForeground(requestContext, batchId, esActivityBatchMap);
+            logger.info(requestContext, "ActivityBatchManagementActor:updateActivityBatch - Successfully synced to Elasticsearch for batchId=" + batchId);
+        } catch (Exception e) {
+            logger.error(requestContext, "ActivityBatchManagementActor:updateActivityBatch - Failed to sync to Elasticsearch for batchId=" + batchId + ", error=" + e.getMessage(), e);
+        }
 
         ActivityBatch updatedBatch = activityBatchDao.readById(activityId, batchId, requestContext);
         Map<String, Object> esActivityBatchMap = createActivityBatchMapping(updatedBatch, dateFormat);
@@ -228,7 +248,7 @@ public class ActivityBatchManagementActor extends BaseBatchMgmtActor {
             );
 
             // Push event to Kafka
-            String topic = ProjectUtil.getConfigValue("kafka_topics_batch_instruction");
+            String topic = ProjectUtil.getConfigValue("kafka_activity_batch_topic");
             InstructionEventGenerator.pushInstructionEvent(batchId, topic, eventData);
 
             logger.info(requestContext,
