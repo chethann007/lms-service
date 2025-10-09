@@ -100,4 +100,25 @@ public class ActivityEnrollmentController extends BaseController {
                 },
                 httpRequest);
     }
+
+    /**
+     * Handles requests to list users enrolled in a specific activity.
+     * Validates the request and delegates to the actor for processing.
+     *
+     * @param httpRequest the HTTP request containing activity details
+     * @return a CompletionStage containing the list of enrolled users
+     */
+    public CompletionStage<Result> listActivityEnrollments(Http.Request httpRequest) {
+        return handleRequest(
+                activityEnrolmentActor,
+                ActorOperations.LIST_ACTIVITY_ENROLLMENTS.getValue(),
+                httpRequest.body().asJson(),
+                (request) -> {
+                    Request req = (Request) request;
+                    validator.validateListActivityEnrollments(req);
+                    return null;
+                },
+                getAllRequestHeaders(httpRequest),
+                httpRequest);
+    }
 }
