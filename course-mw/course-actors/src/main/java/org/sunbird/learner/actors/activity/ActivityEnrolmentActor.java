@@ -51,6 +51,9 @@ public class ActivityEnrolmentActor extends BaseBatchMgmtActor {
             case "listUserActivityEnrollments":
                 listUserActivityEnrollments(request);
                 break;
+            case "listActivityEnrollments":
+                listActivityEnrollments(request);
+                break;
             default:
                 onReceiveUnsupportedOperation(request.getOperation());
                 break;
@@ -422,5 +425,46 @@ public class ActivityEnrolmentActor extends BaseBatchMgmtActor {
         return false;
     }
 
+    /**
+     * Lists all users enrolled in a specific activity batch.
+     * Uses the materialized view for better performance.
+     *
+     * @param actorMessage The request object containing activity details.
+     * @throws Exception If any validation or processing error occurs.
+     */
+    private void listActivityEnrollments(Request actorMessage) throws Exception {
+        Map<String, Object> request = actorMessage.getRequest();
+        RequestContext requestContext = actorMessage.getRequestContext();
+        
+        String activityId = (String) request.get(JsonKey.ACTIVITYID);
+        String activityType = (String) request.get(JsonKey.ACTIVITYTYPE);
+        String batchId = (String) request.get(JsonKey.BATCH_ID);
+        Boolean activeOnly = (Boolean) request.getOrDefault("activeOnly", true);
+
+        // Validate activity exists and type matches
+        if (isPrimaryActivityType(activityType)) {
+            validateActivityIdAndType(requestContext, activityId, activityType);
+        }
+
+        // Get enrollments using materialized view
+        List<Map<String, Object>> enrollments = activityEnrollmentDao.getBatchEnrollments(
+                requestContext, activityId, activityType, batchId, activeOnly);
+
+        Response response = new Response();
+        Map<String, Object> result = new HashMap<>();
+        result.put("enrollments", enrollments != null ? enrollments : new java.util.ArrayList<>());
+        result.put(JsonKey.COUNT, enrollments != null ? enrollments.size() : 0);
+        result.put(JsonKey.ACTIVITYID, activityId);
+        result.put(JsonKey.ACTIVITYTYPE, activityType);
+        result.put(JsonKey.BATCH_ID, batchId);
+        result.put("activeOnly", activeOnly);
+        response.put(JsonKey.RESPONSE, result);
+        sender().tell(response, self());
+
+        logger.info(requestContext,
+                "ActivityEnrolmentActor: listActivityEnrollments - Retrieved " + 
+                (enrollments != null ? enrollments.size() : 0) + " enrollments for activity: " + activityId +
+                ", batch: " + batchId + ", activeOnly: " + activeOnly);
+    }
 
 }
