@@ -427,4 +427,58 @@ public class ActivityEnrollmentDaoImpl implements ActivityEnrollmentDao {
             }
         }
     }
+
+    @Override
+    public List<Map<String, Object>> getBatchEnrollments(RequestContext requestContext, String activityId, String activityType, String batchId, boolean activeOnly) {
+        // Validate input parameters
+        if (activityId == null || activityId.trim().isEmpty()) {
+            throw new ProjectCommonException(
+                    ResponseCode.invalidRequestData.getErrorCode(),
+                    "activityId cannot be null or empty",
+                    ResponseCode.CLIENT_ERROR.getResponseCode());
+        }
+        if (activityType == null || activityType.trim().isEmpty()) {
+            throw new ProjectCommonException(
+                    ResponseCode.invalidRequestData.getErrorCode(),
+                    "activityType cannot be null or empty",
+                    ResponseCode.CLIENT_ERROR.getResponseCode());
+        }
+        if (batchId == null || batchId.trim().isEmpty()) {
+            throw new ProjectCommonException(
+                    ResponseCode.invalidRequestData.getErrorCode(),
+                    "batchId cannot be null or empty",
+                    ResponseCode.CLIENT_ERROR.getResponseCode());
+        }
+
+        // Query the materialized view using composite primary key
+        Map<String, Object> primaryKey = new HashMap<>();
+        primaryKey.put("activityid", activityId);
+        primaryKey.put("activitytype", activityType);
+        primaryKey.put("batchid", batchId);
+
+        Response response = cassandraOperation.getRecordByIdentifier(
+                requestContext,
+                userEnrollmentDb.getKeySpace(),
+                "enrollments_by_batch", // Materialized view table name
+                primaryKey,
+                null);
+
+        List<Map<String, Object>> enrollmentList = (List<Map<String, Object>>) response.get(JsonKey.RESPONSE);
+
+        if (CollectionUtils.isEmpty(enrollmentList)) {
+            return new ArrayList<>();
+        }
+
+        // Filter by active status if required
+        if (activeOnly) {
+            return enrollmentList.stream()
+                    .filter(enrollment -> {
+                        Boolean active = (Boolean) enrollment.get("active");
+                        return active != null && active;
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        return enrollmentList;
+    }
 }

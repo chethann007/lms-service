@@ -125,4 +125,17 @@ public interface ActivityEnrollmentDao {
      * @return true if user is actively enrolled, false otherwise
      */
     boolean isUserEnrolled(RequestContext requestContext, String userId, String activityId, String activityType, String batchId);
+
+    /**
+     * Get all users enrolled in a specific activity batch using materialized view.
+     * This method queries the enrollments_by_batch materialized view for better performance.
+     *
+     * @param requestContext Request context
+     * @param activityId Activity identifier
+     * @param activityType Activity type (CF, CB, CL)
+     * @param batchId Batch identifier
+     * @param activeOnly If true, return only active users; if false, return all users
+     * @return List of user enrollment details
+     */
+    List<Map<String, Object>> getBatchEnrollments(RequestContext requestContext, String activityId, String activityType, String batchId, boolean activeOnly);
 }
